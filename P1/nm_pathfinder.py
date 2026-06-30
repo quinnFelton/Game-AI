@@ -1,103 +1,17 @@
 from math import inf, sqrt
 from heapq import heappop, heappush
 
-def dijkstras_shortest_path(initial_position, destination, graph, adj):
-    """ Searches for a minimal cost path through a graph using Dijkstra's algorithm.
+def euclidean_distance(point1, point2):
+    """ Calculates the Euclidean distance between two points.
 
     Args:
-        initial_position: The initial cell from which the path extends.
-        destination: The end location for the path.
-        graph: A loaded level, containing walls, spaces, and waypoints.
-        adj: An adjacency function returning cells adjacent to a given cell as well as their respective edge costs.
+        point1: A tuple representing the first point (x1, y1).
+        point2: A tuple representing the second point (x2, y2).
 
     Returns:
-        If a path exits, return a list containing all cells from initial_position to destination.
-        Otherwise, return None.
-
+        The Euclidean distance between point1 and point2.
     """
-    paths = {initial_position: []}          # maps cells to previous cells on path
-    pathcosts = {initial_position: 0}       # maps cells to their pathcosts (found so far)
-    queue = []
-    heappush(queue, (0, initial_position))  # maintain a priority queue of cells
-    
-    while queue:
-        priority, cell = heappop(queue)
-        if cell == destination:
-            return path_to_cell(cell, paths)
-        
-        # investigate children
-        for (child, step_cost) in adj(graph, cell):
-            # calculate cost along this path to child
-            cost_to_child = priority + transition_cost(graph, cell, child)
-            if child not in pathcosts or cost_to_child < pathcosts[child]:
-                pathcosts[child] = cost_to_child            # update the cost
-                paths[child] = cell                         # set the backpointer
-                heappush(queue, (cost_to_child, child))     # put the child on the priority queue
-            
-    return False
-
-def path_to_cell(cell, paths):
-    if cell == []:
-        return []
-    return path_to_cell(paths[cell], paths) + [cell]
-    
-
-
-
-def navigation_edges(level, cell):
-    """ Provides a list of adjacent cells and their respective costs from the given cell.
-
-    Args:
-        level: A loaded level, containing walls, spaces, and waypoints.
-        cell: A target location.
-
-    Returns:
-        A list of tuples containing an adjacent cell's coordinates and the cost of the edge joining it and the
-        originating cell.
-
-        E.g. from (0,0):
-            [((0,1), 1),
-             ((1,0), 1),
-             ((1,1), 1.4142135623730951),
-             ... ]
-    """
-    res = []
-    for delta in [(x, y) for x in [-1,0,1] for y in [-1,0,1] if not (x==0 and y==0)]:
-        new = (cell[0] + delta[0], cell[1] + delta[1])
-        if new in level['spaces']:
-            res.append((new, transition_cost(level, new, cell)))
-    return res
-
-def transition_cost(level, cell, cell2):
-    distance = sqrt((cell2[0] - cell[0])**2 + (cell2[1] - cell[1])**2)
-    average_cost = (level['spaces'][cell] + level['spaces'][cell2])/2
-    return distance * average_cost
-
-
-def test_route(filename, src_waypoint, dst_waypoint):
-    """ Loads a level, searches for a path between the given waypoints, and displays the result.
-
-    Args:
-        filename: The name of the text file containing the level.
-        src_waypoint: The character associated with the initial waypoint.
-        dst_waypoint: The character associated with the destination waypoint.
-
-    """
-
-    # Load and display the level.
-    level = load_level(filename)
-    show_level(level)
-
-    # Retrieve the source and destination coordinates from the level.
-    src = level['waypoints'][src_waypoint]
-    dst = level['waypoints'][dst_waypoint]
-
-    # Search for and display the path from src to dst.
-    path = dijkstras_shortest_path(src, dst, level, navigation_edges)
-    if path:
-        show_level(level, path)
-    else:
-        print("No path possible!")
+    return sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
 
 def find_box(point, mesh):
     """
@@ -169,9 +83,7 @@ def breadth_first_search (source_box, destination_box, mesh):
 
     return None, explored_boxes
 
-def _box_center(box):
-    x1, x2, y1, y2 = box
-    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
 
 def make_detail(point, box):
     """
@@ -202,10 +114,91 @@ def detail_path(source_point, path):
         A list of detailed points representing the refined path.
     """
     detailed_points = [source_point]
-    for i, box in enumerate(path, start=1):
+    for i, box in enumerate(path):
         # Create a detailed point for each box (e.g., the closest point to the previous detailed point within the box)
         detailed_points.append(make_detail(detailed_points[i-1], box))
     return detailed_points
+
+def reconstruct_box_path(end_box, parents):
+    """
+    Reconstructs the sequence of boxes from start to end.
+    """
+    path = []
+    current = end_box
+
+    while current is not None:
+        path.append(current)
+        current = parents[current]
+
+    path.reverse()
+    return path
+
+
+def dijkstras_shortest_path(source_point, destination_point, mesh):
+    """
+    Runs Dijkstra's algorithm over navmesh boxes.
+
+    The nodes are boxes.
+    The edges come from mesh["adj"].
+    The edge costs come from distances between detail points.
+    """
+    source_box, destination_box = find_startFinish_points(source_point, destination_point, mesh)
+    if source_box is None or destination_box is None:
+        return None, [], {}
+
+    if source_box == destination_box:
+        return [source_box], [source_box], {
+            source_box: source_point,
+            destination_box: destination_point
+        }
+
+    adjacency = mesh.get("adj", {})
+
+    parents = {source_box: None}
+    pathcosts = {source_box: 0}
+
+    # detail_points[box] is the exact point used inside that box.
+    detail_points = {source_box: source_point}
+
+    explored_boxes = []
+
+    queue = []
+    heappush(queue, (0, source_box))
+
+    while queue:
+        current_cost, current_box = heappop(queue)
+
+        # Ignore stale queue entries.
+        # This matters because the same box can be pushed multiple times
+        # if a cheaper path is discovered later.
+        if current_cost != pathcosts[current_box]:
+            continue
+
+        explored_boxes.append(current_box)
+
+        if current_box == destination_box:
+            box_path = reconstruct_box_path(destination_box, parents)
+            box_path.append(destination_box)
+            return box_path, explored_boxes, detail_points
+
+        current_detail = detail_points[current_box]
+
+        for neighbor_box in adjacency.get(current_box, []):
+            if neighbor_box == destination_box:
+                neighbor_detail = destination_point
+            else:
+                neighbor_detail = make_detail(current_detail, neighbor_box)
+
+            step_cost = euclidean_distance(current_detail, neighbor_detail)
+            cost_to_neighbor = current_cost + step_cost
+
+            if neighbor_box not in pathcosts or cost_to_neighbor < pathcosts[neighbor_box]:
+                pathcosts[neighbor_box] = cost_to_neighbor
+                parents[neighbor_box] = current_box
+                detail_points[neighbor_box] = neighbor_detail
+                heappush(queue, (cost_to_neighbor, neighbor_box))
+
+    return None, explored_boxes, detail_points
 
 def find_path (source_point, destination_point, mesh):
 
@@ -227,17 +220,30 @@ def find_path (source_point, destination_point, mesh):
     boxes = {start_box, finish_box}
     print("start_box: ", start_box)
     print("finish_box: ", finish_box)
-    boxes, hold = breadth_first_search(start_box, finish_box, mesh)
-    if boxes is None:
-        print("No path found from source to destination.")
+    if start_box == finish_box:
+        return [source_point, destination_point], [start_box]
+    check, hold = breadth_first_search(start_box, finish_box, mesh)
+    if check is None:
+        print("No path found from source to destination with BFS")
+        return [],[]
     """
     if (start_box == None or finish_box == None):
         return Exception
     
     for box in boxes:
         path.append(_box_center(box))
-    """
+    
     boxes = dijkstras_shortest_path(start_box, finish_box, mesh)
     path = detail_path(source_point, boxes)
     path.append(destination_point)
-    return path, boxes
+    """
+    box_path, explored_boxes, detail_points = dijkstras_shortest_path( start_box, finish_box, mesh)
+
+    if box_path is None:
+        print("No path!")
+        return [], explored_boxes
+
+    path = detail_path(source_point, box_path)
+    path.append(destination_point)
+
+    return path, box_path
