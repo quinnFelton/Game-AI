@@ -178,7 +178,7 @@ def dijkstras_shortest_path(source_point, destination_point, mesh):
 
         if current_box == destination_box:
             box_path = reconstruct_box_path(destination_box, parents)
-            box_path.append(destination_box)
+            #box_path.append(destination_box)
             return box_path, explored_boxes, detail_points
 
         current_detail = detail_points[current_box]
@@ -237,7 +237,7 @@ def find_path (source_point, destination_point, mesh):
     path = detail_path(source_point, boxes)
     path.append(destination_point)
     """
-    box_path, explored_boxes, detail_points = dijkstras_shortest_path( start_box, finish_box, mesh)
+    box_path, explored_boxes, detail_points = dijkstras_shortest_path( source_point, destination_point, mesh)
 
     if box_path is None:
         print("No path!")
