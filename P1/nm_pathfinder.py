@@ -134,9 +134,9 @@ def reconstruct_box_path(end_box, parents):
     return path
 
 
-def dijkstras_shortest_path(source_point, destination_point, mesh):
+def A_shortest_path(source_point, destination_point, mesh):
     """
-    Runs Dijkstra's algorithm over navmesh boxes.
+    Runs A* algorithm over navmesh boxes.
 
     The nodes are boxes.
     The edges come from mesh["adj"].
@@ -160,21 +160,20 @@ def dijkstras_shortest_path(source_point, destination_point, mesh):
     # detail_points[box] is the exact point used inside that box.
     detail_points = {source_box: source_point}
 
-    explored_boxes = []
+    explored_boxes = set()
 
     queue = []
-    heappush(queue, (0, source_box))
+    heappush(queue, (euclidean_distance(source_point, destination_point), source_box))
 
     while queue:
         current_cost, current_box = heappop(queue)
 
-        # Ignore stale queue entries.
-        # This matters because the same box can be pushed multiple times
-        # if a cheaper path is discovered later.
-        if current_cost != pathcosts[current_box]:
+        if current_box in explored_boxes:
             continue
 
-        explored_boxes.append(current_box)
+        explored_boxes.add(current_box)
+        
+        current_cost_true = pathcosts[current_box]
 
         if current_box == destination_box:
             box_path = reconstruct_box_path(destination_box, parents)
@@ -190,14 +189,14 @@ def dijkstras_shortest_path(source_point, destination_point, mesh):
                 neighbor_detail = make_detail(current_detail, neighbor_box)
 
             step_cost = euclidean_distance(current_detail, neighbor_detail)
-            cost_to_neighbor = current_cost + step_cost
+            cost_to_neighbor = current_cost_true + step_cost  # true cost, not priority
 
             if neighbor_box not in pathcosts or cost_to_neighbor < pathcosts[neighbor_box]:
                 pathcosts[neighbor_box] = cost_to_neighbor
                 parents[neighbor_box] = current_box
                 detail_points[neighbor_box] = neighbor_detail
-                heappush(queue, (cost_to_neighbor, neighbor_box))
-
+                priority = cost_to_neighbor + euclidean_distance(neighbor_detail, destination_point)
+                heappush(queue, (priority, neighbor_box))
     return None, explored_boxes, detail_points
 
 def find_path (source_point, destination_point, mesh):
@@ -237,7 +236,7 @@ def find_path (source_point, destination_point, mesh):
     path = detail_path(source_point, boxes)
     path.append(destination_point)
     """
-    box_path, explored_boxes, detail_points = dijkstras_shortest_path( source_point, destination_point, mesh)
+    box_path, explored_boxes, detail_points = A_shortest_path( source_point, destination_point, mesh)
 
     if box_path is None:
         print("No path!")
@@ -246,4 +245,4 @@ def find_path (source_point, destination_point, mesh):
     path = detail_path(source_point, box_path)
     path.append(destination_point)
 
-    return path, box_path
+    return path, explored_boxes
